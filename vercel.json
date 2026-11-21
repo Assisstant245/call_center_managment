@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "app": { "root": ".", "framework": "vite" },
+    "call-center-backend": { "root": "call-center-backend", "framework": "nestjs" },
+    "forecasting-service": { "root": "forecasting-service", "framework": "fastapi" }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": { "service": "call-center-backend" } },
+    { "source": "/(.*)", "destination": { "service": "app" } }
+  ]
+}
