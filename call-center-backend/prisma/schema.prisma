@@ -1,0 +1,305 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// =========================
+// USER
+// =========================
+
+model User {
+  id       Int    @id @default(autoincrement())
+  name     String
+  email    String @unique
+  password String
+  role     String @default("agent")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  agentSkills AgentSkill[]
+  agentShifts AgentShift[]
+  agent       Agent?
+}
+
+// =========================
+// AGENT
+// =========================
+
+model Agent {
+  id         Int       @id @default(autoincrement())
+  employeeId String    @unique @map("employee_id") @db.VarChar(50)
+  name       String    @db.VarChar(100)
+  email      String    @unique @db.VarChar(150)
+  phone      String?   @db.VarChar(30)
+  status     String    @default("Offline") @db.VarChar(30)
+  hireDate   DateTime? @map("hire_date") @db.Date
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt
+
+  userId Int?  @unique
+  user   User? @relation(fields: [userId], references: [id])
+
+  // Agent <-> Skill
+  agentSkills AgentSkill[]
+
+  // Agent <-> Shift
+  agentShifts AgentShift[]
+  schedules   AgentSchedule[]
+
+  timeOffRequests TimeOffRequest[]
+  swapsRequested  ShiftSwapRequest[] @relation("SwapRequester")
+  swapsReceived   ShiftSwapRequest[] @relation("SwapTarget")
+  adherenceEvents AdherenceEvent[]
+
+  @@map("agents")
+}
+
+model Forecast {
+  id Int @id @default(autoincrement())
+
+  skillId Int
+  channel String
+
+  intervalStart DateTime
+  intervalEnd   DateTime
+
+  forecastCalls Int
+  forecastLower Int?
+  forecastUpper Int?
+
+  requiredAgents Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  skill Skill @relation(fields: [skillId], references: [id])
+
+  // One forecast can have multiple scheduled agents
+  agentSchedules AgentSchedule[]
+
+  @@index([skillId])
+  @@index([intervalStart])
+  @@map("forecasts")
+}
+
+model AgentSchedule {
+  id         Int  @id @default(autoincrement())
+  agentId    Int
+  skillId    Int
+  forecastId Int?
+
+  channel       String
+  intervalStart DateTime
+  intervalEnd   DateTime
+  status        String   @default("Scheduled")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  agent    Agent     @relation(fields: [agentId], references: [id])
+  skill    Skill     @relation(fields: [skillId], references: [id])
+  forecast Forecast? @relation(fields: [forecastId], references: [id])
+
+  @@index([agentId])
+  @@index([skillId])
+  @@index([forecastId])
+  @@index([intervalStart])
+}
+
+// =========================
+// SKILL
+// =========================
+
+model Skill {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique @db.VarChar(100)
+  description String?  @db.VarChar(255)
+  status      String   @default("Active") @db.VarChar(30)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt
+
+  schedules   AgentSchedule[]
+  agentSkills AgentSkill[]
+
+  forecasts   Forecast[]
+  callHistory CallHistory[]
+
+  @@map("skills")
+}
+
+// =========================
+// AGENT SKILL
+// =========================
+
+model AgentSkill {
+  id      Int @id @default(autoincrement())
+  agentId Int @map("agent_id")
+  skillId Int @map("skill_id")
+
+  agent  Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  skill  Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  user   User? @relation(fields: [userId], references: [id])
+  userId Int?
+
+  // Same agent cannot have the same skill twice
+  @@unique([agentId, skillId])
+  @@map("agent_skills")
+}
+
+// =========================
+// SHIFT
+// =========================
+
+model Shift {
+  id           Int      @id @default(autoincrement())
+  name         String   @db.VarChar(100)
+  startTime    DateTime @map("start_time")
+  endTime      DateTime @map("end_time")
+  breakMinutes Int?     @map("break_minutes")
+  status       String   @default("Active") @db.VarChar(30)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt
+
+  // Shift <-> Agent
+  agentShifts AgentShift[]
+
+  @@map("shifts")
+}
+
+// =========================
+// AGENT SHIFT
+// =========================
+
+model AgentShift {
+  id       Int      @id @default(autoincrement())
+  agentId  Int      @map("agent_id")
+  shiftId  Int      @map("shift_id")
+  workDate DateTime @map("work_date") @db.Date
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  shift Shift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  swapsAsRequesterShift ShiftSwapRequest[] @relation("SwapRequesterShift")
+  swapsAsTargetShift    ShiftSwapRequest[] @relation("SwapTargetShift")
+  user                  User?              @relation(fields: [userId], references: [id])
+  userId                Int?
+
+  @@unique([agentId, workDate])
+  @@map("agent_shifts")
+}
+
+// =========================
+// TIME-OFF REQUEST
+// status: Pending | Approved | Rejected | Cancelled
+// =========================
+
+model TimeOffRequest {
+  id         Int      @id @default(autoincrement())
+  agentId    Int      @map("agent_id")
+  startDate  DateTime @map("start_date") @db.Date
+  endDate    DateTime @map("end_date") @db.Date
+  type       String   @default("Vacation") @db.VarChar(30)
+  reason     String?  @db.VarChar(500)
+  status     String   @default("Pending") @db.VarChar(30)
+  reviewedBy Int?     @map("reviewed_by")
+  reviewNote String?  @map("review_note") @db.VarChar(500)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([status])
+  @@map("time_off_requests")
+}
+
+// =========================
+// SHIFT SWAP REQUEST
+// status: Pending (waiting for target agent)
+//       | Accepted (target agreed, waiting for manager)
+//       | Approved (swap executed) | Rejected | Cancelled
+// =========================
+
+model ShiftSwapRequest {
+  id               Int      @id @default(autoincrement())
+  requesterId      Int      @map("requester_id")
+  targetId         Int      @map("target_id")
+  requesterShiftId Int      @map("requester_shift_id")
+  targetShiftId    Int      @map("target_shift_id")
+  reason           String?  @db.VarChar(500)
+  status           String   @default("Pending") @db.VarChar(30)
+  reviewedBy       Int?     @map("reviewed_by")
+  reviewNote       String?  @map("review_note") @db.VarChar(500)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt
+
+  requester      Agent      @relation("SwapRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  target         Agent      @relation("SwapTarget", fields: [targetId], references: [id], onDelete: Cascade)
+  requesterShift AgentShift @relation("SwapRequesterShift", fields: [requesterShiftId], references: [id], onDelete: Cascade)
+  targetShift    AgentShift @relation("SwapTargetShift", fields: [targetShiftId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@map("shift_swap_requests")
+}
+
+// =========================
+// ADHERENCE EVENT
+// state: Available | OnCall | Break | Meeting | Offline
+// =========================
+
+model AdherenceEvent {
+  id         Int      @id @default(autoincrement())
+  agentId    Int      @map("agent_id")
+  state      String   @db.VarChar(30)
+  occurredAt DateTime @default(now()) @map("occurred_at")
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, occurredAt])
+  @@map("adherence_events")
+}
+
+// =========================
+// HISTORICAL CALL DATA (for reports)
+// =========================
+
+model CallHistory {
+  id             Int      @id @default(autoincrement())
+  intervalStart  DateTime @map("interval_start")
+  channel        String   @db.VarChar(30)
+  skillId        Int      @map("skill_id")
+  callsOffered   Int      @map("calls_offered")
+  callsAnswered  Int      @map("calls_answered")
+  callsAbandoned Int      @map("calls_abandoned")
+  avgHandleSec   Float    @map("avg_handle_sec")
+  avgWaitSec     Float    @map("avg_wait_sec")
+
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([intervalStart, channel, skillId])
+  @@index([intervalStart])
+  @@map("call_history")
+}
+
+// =========================
+// NOTIFICATION (in-app; also emailed when SMTP configured)
+// userId null => broadcast to managers/admins/planners
+// =========================
+
+model Notification {
+  id        Int       @id @default(autoincrement())
+  userId    Int?      @map("user_id")
+  title     String    @db.VarChar(150)
+  message   String    @db.VarChar(500)
+  type      String    @default("info") @db.VarChar(30)
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("notifications")
+}

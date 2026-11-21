@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: call-center-backend
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/call_center_wfm?schema=public
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: call_center_wfm
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: call-center-backend/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      - run: npm run build
+      - run: npm test
+      - run: npm run test:e2e
+
+  forecasting:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: forecasting-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: forecasting-service/requirements.txt
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q
+
+  # Build and push images to ECR, then roll the ECS services (main branch only).
+  # Requires repository secrets: AWS_ROLE_ARN, AWS_REGION and the variables below.
+  deploy:
+    if: github.ref == 'refs/heads/main' && vars.AWS_DEPLOY_ENABLED == 'true'
+    needs: [frontend, backend, forecasting]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build and push images
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          docker build -t $REGISTRY/wfm-backend:$TAG call-center-backend
+          docker build -t $REGISTRY/wfm-forecasting:$TAG forecasting-service
+          docker build -t $REGISTRY/wfm-frontend:$TAG --build-arg VITE_API_URL=${{ vars.PUBLIC_API_URL }} .
+          for img in backend forecasting frontend; do docker push $REGISTRY/wfm-$img:$TAG; done
+      - name: Roll ECS services
+        run: |
+          for svc in backend forecasting frontend; do
+            aws ecs update-service --cluster ${{ vars.ECS_CLUSTER }} --service wfm-$svc --force-new-deployment
+          done

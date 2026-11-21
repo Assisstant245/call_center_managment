@@ -1,0 +1,6 @@
+node_modules
+dist
+.env
+.git
+call-center-backend
+forecasting-service

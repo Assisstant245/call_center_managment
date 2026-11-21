@@ -1,0 +1,48 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# env files (keep the examples)
+.env
+.env.*
+!.env.example
+
+# python
+forecasting-service/venv/
+__pycache__/
+.pytest_cache/
+
+# tool / editor config folders and local artefacts
+.claude/
+.agents/
+.cursor/
+.devin/
+skills-lock.json
+*.tsbuildinfo
+forecasting-service/forecast_output.csv
+forecasting-service/staffing_output.csv
+forecasting-service/forecast_accuracy.csv
+call-center-backend/.git_empty_backup/
+
+.windsurf/

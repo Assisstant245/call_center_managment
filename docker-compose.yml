@@ -1,0 +1,63 @@
+# Whole stack: docker compose up --build
+# Frontend http://localhost:8080 · API http://localhost:3000 · Forecast service http://localhost:8000
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: call_center_wfm
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d call_center_wfm"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  forecasting:
+    build: ./forecasting-service
+    environment:
+      FORECAST_API_KEY: ${FORECAST_API_KEY:-}
+
+  backend:
+    build: ./call-center-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      forecasting:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/call_center_wfm?schema=public
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in your environment or .env file}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
+      REDIS_URL: redis://redis:6379
+      FORECAST_SERVICE_URL: http://forecasting:8000
+      FORECAST_API_KEY: ${FORECAST_API_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+    ports:
+      - "3000:3000"
+
+  frontend:
+    build:
+      context: .
+      args:
+        VITE_API_URL: ${PUBLIC_API_URL:-http://localhost:3000}
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:
